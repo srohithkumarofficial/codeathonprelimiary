@@ -1,0 +1,121 @@
+const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
+
+export type Stats = {
+  hits: number;
+  misses: number;
+  evictions: number;
+  expirations: number;
+  size: number;
+  capacity: number;
+  policy: string;
+  totalRequests: number;
+  hitRate: number;
+  missRate: number;
+};
+
+export type SimulationResult = {
+  policy: string;
+  workload: string;
+  stats: Stats;
+};
+
+export type WorkloadProfile = {
+  id: string;
+  name: string;
+  description: string;
+  behavior: string[];
+};
+
+export type WorkloadCharacteristics = {
+  requests: number;
+  uniqueKeys: number;
+  repeatedAccesses: number;
+  topTenPercentAccessShare: number;
+  temporalLocality: number;
+  frequencyConcentration: "High" | "Medium" | "Low";
+  temporalLocalityLevel: "High" | "Medium" | "Low";
+  workloadType: string;
+  mostAccessedKeys: Array<{ key: string; accesses: number; accessShare: number }>;
+  frequencyDistribution: Array<{ accessesPerKey: number; keyCount: number }>;
+};
+
+export type PolicyAnalysis = {
+  workload: string;
+  workloadName: string;
+  capacity: number;
+  comparisons: SimulationResult[];
+  characteristics: WorkloadCharacteristics;
+  insight: string;
+};
+
+export type StressResult = {
+  attempted: number;
+  completed: number;
+  errors: number;
+  finalSize: number;
+  stats: Stats;
+};
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${baseUrl}/api/cache${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? body.status ?? `Request failed (${response.status})`);
+  }
+  return body as T;
+}
+
+function validateStats(value: Stats): Stats {
+  const numericKeys: Array<keyof Stats> = [
+    "hits", "misses", "evictions", "expirations", "size", "capacity", "totalRequests", "hitRate", "missRate",
+  ];
+  if (!value || numericKeys.some((key) => typeof value[key] !== "number")) {
+    throw new Error("The backend returned an invalid cache metrics response.");
+  }
+  return value;
+}
+
+export const api = {
+  stats: async () => validateStats(await request<Stats>("/stats")),
+  workloads: () => request<WorkloadProfile[]>("/workloads"),
+  put: (key: string, value: string, ttlSeconds?: number) =>
+    request<{ key: string; value: string; status: string }>(`/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value, ttlSeconds }),
+    }),
+  get: async (key: string) => {
+    const response = await fetch(`${baseUrl}/api/cache/${encodeURIComponent(key)}`);
+    const result = await response.json();
+    if (!response.ok && response.status !== 404) {
+      throw new Error(result.error ?? `Request failed (${response.status})`);
+    }
+    return result as { key: string; value: string | null; status: string };
+  },
+  remove: (key: string) =>
+    request<{ status: string; key: string }>(`/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  clear: () => request<{ status: string }>("", { method: "DELETE" }),
+  policy: (policy: string) =>
+    request<{ policy: string }>("/policy", {
+      method: "POST",
+      body: JSON.stringify({ policy }),
+    }),
+  configure: (capacity: number, policy: string) =>
+    request<{ capacity: number; policy: string; workloads: string[] }>(
+      `/configure?capacity=${capacity}&policy=${encodeURIComponent(policy)}`,
+      { method: "POST" },
+    ),
+  analyze: (workload: string, capacity: number, requests: number) =>
+    request<PolicyAnalysis>(
+      `/analyze?workload=${encodeURIComponent(workload)}&capacity=${capacity}&requests=${requests}`,
+      { method: "POST" },
+    ),
+  stress: (threads: number, operations: number) =>
+    request<StressResult>(`/stress?threads=${threads}&operations=${operations}`, { method: "POST" }),
+};
