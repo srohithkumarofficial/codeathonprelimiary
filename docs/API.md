@@ -12,7 +12,7 @@ Base path: `/api/cache`. JSON errors return `{ "error": "..." }`.
 - `GET /config` — current capacity, policy, and legacy sample workload identifiers.
 - `POST /policy` — JSON `{ "policy": "LFU" }` or `{ "policy": "LRU" }`; retains entries while rebuilding policy metadata.
 - `POST /configure?capacity=100&policy=LRU` — replace the active cache with the requested capacity and policy. This resets entries and their counters.
-- `POST /stress?threads=8&operations=1000` — concurrent GET/PUT work against the active cache. Returns attempted and completed operations, errors, final size, and actual cache stats.
+- `POST /stress?threads=8&operations=1000` — concurrent GET/PUT work against the active cache. One stress run is allowed at a time; a concurrent request receives 429. Returns attempted/completed counts, run-specific reads/writes/hits/misses, errors, throughput, final size, and the active cache's cumulative stats snapshot. It does not represent a controlled LRU-vs-LFU benchmark.
 
 ## Policy Lab
 
@@ -21,6 +21,28 @@ Base path: `/api/cache`. JSON errors return `{ "error": "..." }`.
 - `POST /simulate?workload=locality&capacity=4` — legacy sample simulation endpoint; runs the same fixed trace against both policies. Workloads: locality, sequential, mixed, burst.
 
 The workload profiles are simulated healthcare-inspired patterns, not production traces. Keys are synthetic and contain no patient data or PHI.
+
+## Automatic benchmark
+
+- `POST /api/benchmarks` accepts JSON such as:
+
+```json
+{
+  "workloadType": "ZIPFIAN",
+  "operations": 10000,
+  "capacity": 500,
+  "distinctKeys": 2000,
+  "ttlSeconds": 30,
+  "readPercentage": 90,
+  "seed": 2026
+}
+```
+
+Supported workload types are `UNIFORM`, `ZIPFIAN`, `SEQUENTIAL_SCAN`, `BURSTY`, `READ_HEAVY`, and `MIXED`. Operations, capacity, and distinct keys are bounded to 1–100,000; TTL is optional and bounded to 1–604,800 seconds; read percentage is 0–100. `READ_HEAVY` requires at least 90% reads. JSON request bodies across the API are limited to 512 KiB. A seed reproduces the ordered operation trace, whose SHA-256 fingerprint is returned.
+
+The response contains independent LRU and LFU results, operation/read/write counts, hit/miss rates, evictions, expirations, throughput, p50/p95/p99 operation latency, workload generation time, and a structured policy recommendation. The generator makes the trace before timing. Each policy receives the same trace with a fresh cache and virtual clock; virtual time advances 1 ms per logical operation so TTL outcomes are reproducible. A warm-up pass runs before one measured pass. The recommendation uses a 2 percentage-point hit-rate threshold, reports whether the result is a clear/modest advantage, similar, or insufficient, and withholds a winner when there are no reads or the measured rates are close.
+
+The optional TTL models elapsed virtual operation time, not a sleep during the run. Throughput and latency are one-run JVM measurements and may vary with runtime warm-up and machine load. The `concurrency` setting remains in the separate `/api/cache/stress` experiment against the shared live cache; concurrent interleaving is not mixed into serial policy comparisons.
 
 ## Metrics endpoint
 

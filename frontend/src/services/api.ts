@@ -52,12 +52,64 @@ export type StressResult = {
   attempted: number;
   completed: number;
   errors: number;
+  reads: number;
+  writes: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+  durationNanos: number;
+  operationsPerSecond: number;
   finalSize: number;
   stats: Stats;
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${baseUrl}/api/cache${path}`, {
+export type BenchmarkWorkload = "UNIFORM" | "ZIPFIAN" | "SEQUENTIAL_SCAN" | "BURSTY" | "READ_HEAVY" | "MIXED";
+
+export type BenchmarkRequest = {
+  workloadType: BenchmarkWorkload;
+  operations: number;
+  capacity: number;
+  distinctKeys: number;
+  ttlSeconds?: number;
+  readPercentage: number;
+  seed: number;
+};
+
+export type BenchmarkPolicyResult = {
+  policy: "LRU" | "LFU";
+  operations: number;
+  reads: number;
+  writes: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+  evictions: number;
+  expirations: number;
+  durationNanos: number;
+  operationsPerSecond: number;
+  p50LatencyNanos: number;
+  p95LatencyNanos: number;
+  p99LatencyNanos: number;
+};
+
+export type BenchmarkResult = {
+  configuration: BenchmarkRequest;
+  workloadGenerationNanos: number;
+  workloadFingerprint: string;
+  comparisons: BenchmarkPolicyResult[];
+  recommendation: {
+    recommendedPolicy: "LRU" | "LFU" | null;
+    assessment: "CLEAR_ADVANTAGE" | "MODEST_ADVANTAGE" | "SIMILAR" | "INSUFFICIENT";
+    hitRateDifference: number;
+    explanation: string;
+    tradeoff: string;
+    limitation: string;
+  };
+  measurementNote: string;
+};
+
+async function request<T>(path: string, init?: RequestInit, apiRoot = "/api/cache"): Promise<T> {
+  const response = await fetch(`${baseUrl}${apiRoot}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -118,4 +170,9 @@ export const api = {
     ),
   stress: (threads: number, operations: number) =>
     request<StressResult>(`/stress?threads=${threads}&operations=${operations}`, { method: "POST" }),
+  benchmark: (configuration: BenchmarkRequest) =>
+    request<BenchmarkResult>("", {
+      method: "POST",
+      body: JSON.stringify(configuration),
+    }, "/api/benchmarks"),
 };

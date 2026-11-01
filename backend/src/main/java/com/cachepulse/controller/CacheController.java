@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class CacheController {
     private final CacheService service;
     private final SimulationService simulations;
+    private final Semaphore stressRunPermit = new Semaphore(1);
 
     public CacheController(CacheService service, SimulationService simulations) {
         this.service = service;
@@ -118,7 +120,7 @@ public class CacheController {
     }
 
     @PostMapping("/stress")
-    public Map<String, Object> stress(
+    public ResponseEntity<Map<String, Object>> stress(
             @RequestParam(defaultValue = "4") int threads,
             @RequestParam(defaultValue = "1000") int operations) {
         long totalOperations = (long) threads * operations;
@@ -127,49 +129,82 @@ public class CacheController {
             throw new IllegalArgumentException(
                     "threads (1-128), operations (1-100000), and total operations (up to 1000000) required");
         }
-
-        CacheEngine<String, String> cache = service.cache();
-        AtomicLong errors = new AtomicLong();
-        long attempted = (long) threads * operations;
-        var executor = Executors.newFixedThreadPool(threads);
-        try {
-            var jobs = new ArrayList<Future<?>>();
-            for (int thread = 0; thread < threads; thread++) {
-                int workerId = thread;
-                jobs.add(executor.submit(() -> runWorker(cache, workerId, operations, errors)));
-            }
-            for (Future<?> job : jobs) {
-                job.get();
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Stress run was interrupted", exception);
-        } catch (Exception exception) {
-            throw new IllegalStateException("Stress run failed", exception);
-        } finally {
-            executor.shutdownNow();
+        if (!stressRunPermit.tryAcquire()) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of("error", "A stress run is already in progress"));
         }
 
-        return Map.of(
-                "attempted", attempted,
-                "completed", attempted - errors.get(),
-                "errors", errors.get(),
-                "finalSize", cache.size(),
-                "stats", cache.stats());
+        try (CacheService.CacheLease lease = service.acquireCacheLease()) {
+            CacheEngine<String, String> cache = lease.cache();
+            AtomicLong errors = new AtomicLong();
+            AtomicLong reads = new AtomicLong();
+            AtomicLong writes = new AtomicLong();
+            AtomicLong hits = new AtomicLong();
+            AtomicLong misses = new AtomicLong();
+            long attempted = (long) threads * operations;
+            var executor = Executors.newFixedThreadPool(threads);
+            long started = System.nanoTime();
+            try {
+                var jobs = new ArrayList<Future<?>>();
+                for (int thread = 0; thread < threads; thread++) {
+                    int workerId = thread;
+                    jobs.add(executor.submit(() -> runWorker(cache, workerId, operations, errors,
+                            reads, writes, hits, misses)));
+                }
+                for (Future<?> job : jobs) {
+                    job.get();
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Stress run was interrupted", exception);
+            } catch (Exception exception) {
+                throw new IllegalStateException("Stress run failed", exception);
+            } finally {
+                executor.shutdownNow();
+            }
+            long durationNanos = Math.max(1, System.nanoTime() - started);
+            long completed = reads.get() + writes.get();
+            return ResponseEntity.ok(Map.ofEntries(
+                    Map.entry("attempted", attempted),
+                    Map.entry("completed", completed),
+                    Map.entry("errors", errors.get()),
+                    Map.entry("reads", reads.get()),
+                    Map.entry("writes", writes.get()),
+                    Map.entry("hits", hits.get()),
+                    Map.entry("misses", misses.get()),
+                    Map.entry("hitRate", reads.get() == 0 ? 0.0 : (double) hits.get() / reads.get()),
+                    Map.entry("durationNanos", durationNanos),
+                    Map.entry("operationsPerSecond", completed * 1_000_000_000.0 / durationNanos),
+                    Map.entry("cacheGeneration", lease.generation()),
+                    Map.entry("cacheCapacity", cache.stats().capacity()),
+                    Map.entry("cachePolicy", cache.getPolicy()),
+                    Map.entry("finalSize", cache.size()),
+                    Map.entry("stats", cache.stats())));
+        } finally {
+            stressRunPermit.release();
+        }
     }
 
     private void runWorker(
             CacheEngine<String, String> cache,
             int workerId,
             int operations,
-            AtomicLong errors) {
+            AtomicLong errors,
+            AtomicLong reads,
+            AtomicLong writes,
+            AtomicLong hits,
+            AtomicLong misses) {
         for (int operation = 0; operation < operations; operation++) {
             try {
                 String key = "stress-" + (operation % 200);
                 if ((operation + workerId) % 3 == 0) {
                     cache.put(key, "v" + operation);
+                    writes.incrementAndGet();
                 } else {
-                    cache.get(key);
+                    CacheEngine.GetResult<String> result = cache.getResult(key);
+                    reads.incrementAndGet();
+                    if ("HIT".equals(result.status())) hits.incrementAndGet();
+                    else misses.incrementAndGet();
                 }
             } catch (RuntimeException exception) {
                 errors.incrementAndGet();

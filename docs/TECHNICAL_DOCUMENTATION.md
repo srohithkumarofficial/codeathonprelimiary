@@ -26,6 +26,16 @@ Trace characterization is calculated from generated keys:
 
 The policy explanation compares measured LRU/LFU hit rates (a gap below two percentage points is described as similar), miss rates, miss counts, eviction counts, and measured locality levels. It is specific to that deterministic run, not a universal recommendation.
 
+## Automatic benchmark methodology
+
+`BenchmarkService` constructs one seeded operation list before running either cache. It supports uniform key selection, Zipfian rank weighting, sequential key scans, bursty access in 100-operation phases (three hot-key phases followed by a cold-key phase), read-heavy Zipfian access, and configurable mixed reads/writes. Bounds are 100,000 operations, cache entries, and unique keys per request. Values are synthetic strings. The response includes a SHA-256 fingerprint of the operation type, key, and value sequence so users can verify reproducibility without returning a potentially large trace.
+
+Each policy receives a new empty cache with the same capacity and virtual clock. Virtual time advances by one millisecond per logical operation, making TTL outcomes equivalent in time units and reproducible without sleeping. Each policy gets one unmeasured warm-up pass followed by a measured pass. Workload generation and fingerprinting are reported separately. Per-operation latency wraps only the cache call; run duration and throughput include the iteration loop and timer overhead. Percentiles are nearest-rank over the measured operation latencies. Since each policy is measured once in the same JVM, throughput and latency are demonstrations rather than statistically robust performance claims.
+
+The advisor recommends the higher measured hit-rate policy only when the difference is at least two percentage points and the trace contains reads. Otherwise it reports similar results or insufficient evidence. Latency and throughput are reported but do not decide the recommendation because a single wall-clock sample is noisy.
+
+No adaptive policy switching is implemented. The advisor returns a recommendation after a run and does not change the active cache. Switching policies safely would require a sustained observation window, a measured switching cost, and hysteresis to prevent reactions to noisy fluctuations; that is outside the current experiment.
+
 ## Limitations
 
-The API stores strings and runs as one process; state is lost on restart. Expired, never-read entries can occupy capacity until overwritten or explicitly removed. The global cache lock prioritizes correctness over parallel throughput. Analysis and stress requests are synchronous and bounded to 100,000 requests or 1,000,000 stress operations per call. Workload profiles are synthetic education/demo data, not patient information or production traces.
+The API stores strings and runs as one process; state is lost on restart. Expired, never-read entries can occupy capacity until accessed or overwritten. The global cache lock prioritizes correctness over parallel throughput. Analysis and benchmark requests are synchronous and bounded to 100,000 operations. Stress requests are synchronous and bounded to 1,000,000 operations per call. Workload profiles are synthetic education/demo data, not patient information or production traces.

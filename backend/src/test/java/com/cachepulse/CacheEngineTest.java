@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.cachepulse.cache.CacheEngine;
 import com.cachepulse.cache.eviction.PolicyType;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class CacheEngineTest {
@@ -45,5 +49,21 @@ class CacheEngineTest {
         CacheEngine<String, String> cache = new CacheEngine<>(1, PolicyType.LRU);
         assertEquals(0.0, cache.stats().hitRate());
         assertEquals(0.0, cache.stats().missRate());
+    }
+
+    @Test
+    void injectedClockMakesTtlExpirationDeterministic() {
+        AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2025-01-01T00:00:00Z"));
+        Clock clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return now.get(); }
+        };
+        CacheEngine<String, String> cache = new CacheEngine<>(1, PolicyType.LRU, clock);
+        cache.put("ttl", "value", java.time.Duration.ofSeconds(2));
+        now.set(now.get().plusSeconds(2));
+
+        assertEquals("EXPIRED", cache.getResult("ttl").status());
+        assertEquals(1, cache.stats().expirations());
     }
 }

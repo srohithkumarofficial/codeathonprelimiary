@@ -29,11 +29,11 @@ public final class LFUPolicy<K> implements EvictionPolicy<K> {
         if (currentBucket.isEmpty()) {
             buckets.remove(frequency);
             if (minFrequency == frequency) {
-                minFrequency = frequency + 1;
+                minFrequency = frequency == Integer.MAX_VALUE ? Integer.MAX_VALUE : frequency + 1;
             }
         }
 
-        int nextFrequency = frequency + 1;
+        int nextFrequency = frequency == Integer.MAX_VALUE ? Integer.MAX_VALUE : frequency + 1;
         frequencies.put(key, nextFrequency);
         buckets.computeIfAbsent(nextFrequency, ignored -> new LinkedHashSet<>()).add(key);
     }

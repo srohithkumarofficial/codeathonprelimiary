@@ -7,7 +7,7 @@ Run backend tests and packaging from `backend/` in PowerShell:
 .\mvnw.cmd package
 ```
 
-The Maven Wrapper pins Maven 3.9.16. A JDK 17+ must be installed; set `JAVA_HOME` if your shell does not already expose it. The JUnit suite covers cache operations, LRU/LFU behavior, TTL, metrics, concurrency, legacy simulations, and healthcare-profile analysis.
+The Maven Wrapper pins Maven 3.9.16. A JDK 17+ must be installed; set `JAVA_HOME` if your shell does not already expose it. The JUnit suite covers cache operations, LRU/LFU behavior, TTL with both real and injected clocks, metrics, concurrency, simulations, seeded benchmark reproducibility, fairness, input validation, policy recommendations, and REST integration.
 
 Build the frontend from `frontend/`:
 
@@ -16,4 +16,6 @@ npm install
 npm run build
 ```
 
-Manual API checks can use the examples in [API](API.md) after starting the backend. Verify `/api/cache/stats`, `/api/cache/workloads`, each `/api/cache/analyze` profile, active-cache PUT/GET/TTL and policy changes, and `/api/cache/stress`. Analysis results and stress totals should come from backend responses, not UI fixtures.
+The frontend currently has no automated test script; `npm run build` runs TypeScript checking and creates the production Vite bundle.
+
+Manual API checks can use the examples in [API](API.md) after starting the backend. Verify `/api/cache/stats`, `/api/cache/workloads`, each `/api/cache/analyze` profile, `/api/benchmarks` with repeated seeds, active-cache PUT/GET/TTL and policy changes, and `/api/cache/stress`. Analysis and benchmark results should come from backend responses, not UI fixtures.

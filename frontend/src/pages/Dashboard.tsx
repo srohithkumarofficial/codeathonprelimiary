@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import MetricCard from "../components/MetricCard";
+import AutomaticBenchmark from "../components/AutomaticBenchmark";
 import PolicyComparison from "../components/PolicyComparison";
 import PolicySelector from "../components/PolicySelector";
 import TTLMonitor from "../components/TTLMonitor";
 import { api, type PolicyAnalysis, type Stats, type StressResult, type WorkloadProfile } from "../services/api";
 
-type Section = "Overview" | "Policy Lab" | "Workloads" | "Stress Test";
-const SECTIONS: Section[] = ["Overview", "Policy Lab", "Workloads", "Stress Test"];
+type Section = "Overview" | "Automatic Evaluation" | "Policy Lab" | "Workloads" | "Stress Test";
+const SECTIONS: Section[] = ["Overview", "Automatic Evaluation", "Policy Lab", "Workloads", "Stress Test"];
 
 export default function Dashboard() {
   const [section, setSection] = useState<Section>("Overview");
@@ -175,13 +176,15 @@ export default function Dashboard() {
       <main className="page-wrap" id="overview">
         <div className="page-intro">
           <div><p className="eyebrow">CACHE PERFORMANCE ENGINEERING</p><h1>{section === "Overview" ? "Cache overview" : section}</h1>
-            <p className="page-description">{section === "Overview" ? "Measure cache behavior, compare eviction strategies, and analyze workload performance." : section === "Policy Lab" ? "Run one deterministic trace through two eviction strategies and inspect the measured behavior." : section === "Workloads" ? "Explore healthcare-oriented simulated access patterns. These profiles use synthetic keys and contain no patient data." : "Exercise the shared in-memory cache with concurrent GET and PUT operations."}</p>
+            <p className="page-description">{section === "Overview" ? "Measure cache behavior, compare eviction strategies, and analyze workload performance." : section === "Automatic Evaluation" ? "Generate a bounded synthetic trace and compare LRU and LFU using the same operations." : section === "Policy Lab" ? "Run one deterministic trace through two eviction strategies and inspect the measured behavior." : section === "Workloads" ? "Explore healthcare-oriented simulated access patterns. These profiles use synthetic keys and contain no patient data." : "Exercise the shared in-memory cache with concurrent GET and PUT operations."}</p>
           </div>
           <div className="live-summary"><span className="summary-label">ACTIVE POLICY</span><strong>{stats?.policy ?? "—"}</strong><span className="summary-divider" /><span className="summary-label">CAPACITY</span><strong>{stats?.capacity.toLocaleString() ?? "—"}</strong></div>
         </div>
 
         {error && <div className="feedback feedback-error" role="alert"><strong>Request could not be completed</strong><span>{error}</span>{connection === "offline" && <small>Start the backend in backend/ with <code>.\mvnw.cmd spring-boot:run</code>.</small>}</div>}
         {message && <div className="feedback feedback-success" role="status"><span className="feedback-check" aria-hidden="true">✓</span>{message}</div>}
+
+        {section === "Automatic Evaluation" && <AutomaticBenchmark />}
 
         {section === "Overview" && (
           <>
@@ -270,7 +273,7 @@ export default function Dashboard() {
               <p className="form-footnote">Maximum 1,000,000 total operations per run.</p>
             </section>
             <section className="panel stress-results"><div className="section-heading"><div><p className="eyebrow">RUN RESULTS</p><h2>{stressResult ? "Measured execution" : "Awaiting a run"}</h2></div></div>
-              {stressResult ? <><div className="stress-stat-grid"><div><strong>{stressResult.attempted.toLocaleString()}</strong><span>Attempted</span></div><div><strong>{stressResult.completed.toLocaleString()}</strong><span>Completed</span></div><div><strong>{stressResult.errors.toLocaleString()}</strong><span>Errors</span></div><div><strong>{stressResult.finalSize.toLocaleString()}</strong><span>Final entries</span></div><div><strong>{stressResult.stats.hits.toLocaleString()}</strong><span>Hits</span></div><div><strong>{stressResult.stats.misses.toLocaleString()}</strong><span>Misses</span></div></div><div className="duration-note">Client-observed duration <b>{((stressDuration ?? 0) / 1000).toFixed(2)} s</b></div></> : <div className="stress-empty"><span className="empty-mark" aria-hidden="true">⌁</span><p>Configure the run and start it to see actual operation totals, errors, and final cache state.</p></div>}
+              {stressResult ? <><div className="stress-stat-grid"><div><strong>{stressResult.attempted.toLocaleString()}</strong><span>Attempted</span></div><div><strong>{stressResult.completed.toLocaleString()}</strong><span>Completed</span></div><div><strong>{stressResult.errors.toLocaleString()}</strong><span>Errors</span></div><div><strong>{stressResult.reads.toLocaleString()} / {stressResult.writes.toLocaleString()}</strong><span>Reads / writes</span></div><div><strong>{stressResult.hits.toLocaleString()} / {stressResult.misses.toLocaleString()}</strong><span>Run hits / misses</span></div><div><strong>{stressResult.finalSize.toLocaleString()}</strong><span>Final entries</span></div></div><div className="duration-note"><span>Server throughput <b>{stressResult.operationsPerSecond.toLocaleString(undefined, { maximumFractionDigits: 0 })} ops/s</b></span><span>Client duration <b>{((stressDuration ?? 0) / 1000).toFixed(2)} s</b></span></div></> : <div className="stress-empty"><span className="empty-mark" aria-hidden="true">⌁</span><p>Configure the run and start it to see actual operation totals, errors, and final cache state.</p></div>}
             </section>
           </div>
         )}

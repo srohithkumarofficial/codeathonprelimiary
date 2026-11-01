@@ -6,6 +6,7 @@ import com.cachepulse.cache.eviction.LFUPolicy;
 import com.cachepulse.cache.eviction.LRUPolicy;
 import com.cachepulse.cache.eviction.PolicyType;
 import java.time.DateTimeException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -17,6 +18,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 public final class CacheEngine<K, V> implements Cache<K, V> {
     private final int capacity;
+    private final Clock clock;
     private final Map<K, CacheEntry<K, V>> entries = new LinkedHashMap<>();
     private final CacheLock lock = new CacheLock();
     private final AtomicInteger currentEntryCount = new AtomicInteger();
@@ -30,10 +32,15 @@ public final class CacheEngine<K, V> implements Cache<K, V> {
     private PolicyType currentPolicy;
 
     public CacheEngine(int capacity, PolicyType policyType) {
+        this(capacity, policyType, Clock.systemUTC());
+    }
+
+    public CacheEngine(int capacity, PolicyType policyType, Clock clock) {
         if (capacity < 1) {
             throw new IllegalArgumentException("Capacity must be positive");
         }
         this.capacity = capacity;
+        this.clock = Objects.requireNonNull(clock, "clock");
         setPolicyInternal(Objects.requireNonNull(policyType, "policyType"));
     }
 
@@ -71,7 +78,7 @@ public final class CacheEngine<K, V> implements Cache<K, V> {
 
         lock.lock();
         try {
-            Instant now = Instant.now();
+            Instant now = clock.instant();
             Instant expiresAt;
             try {
                 expiresAt = ttl == null ? null : now.plus(ttl);
@@ -122,7 +129,7 @@ public final class CacheEngine<K, V> implements Cache<K, V> {
                 return new GetResult<>(Optional.empty(), "MISS");
             }
 
-            if (entry.isExpired(Instant.now())) {
+            if (entry.isExpired(clock.instant())) {
                 entries.remove(key);
                 policy.remove(key);
                 currentEntryCount.decrementAndGet();
@@ -150,7 +157,7 @@ public final class CacheEngine<K, V> implements Cache<K, V> {
                 return Optional.empty();
             }
             currentEntryCount.decrementAndGet();
-            if (entry.isExpired(Instant.now())) {
+            if (entry.isExpired(clock.instant())) {
                 expirations.increment();
                 return Optional.empty();
             }
@@ -190,6 +197,13 @@ public final class CacheEngine<K, V> implements Cache<K, V> {
             long requestCount = totalRequests.sum();
             double hitRate = requestCount == 0 ? 0 : (double) hitCount / requestCount;
             double missRate = requestCount == 0 ? 0 : (double) missCount / requestCount;
+            Instant now = clock.instant();
+            int expiredEntries = 0;
+            for (CacheEntry<K, V> entry : entries.values()) {
+                if (entry.isExpired(now)) {
+                    expiredEntries++;
+                }
+            }
             return new CacheStats(
                     hitCount,
                     missCount,
@@ -200,7 +214,9 @@ public final class CacheEngine<K, V> implements Cache<K, V> {
                     currentPolicy,
                     requestCount,
                     hitRate,
-                    missRate);
+                    missRate,
+                    currentEntryCount.get() - expiredEntries,
+                    expiredEntries);
         } finally {
             lock.unlock();
         }

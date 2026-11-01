@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.cachepulse.cache.CacheStats;
 import com.cachepulse.cache.eviction.PolicyType;
 import com.cachepulse.dto.WorkloadCharacteristics;
+import com.cachepulse.dto.BenchmarkPolicyResult;
 import com.cachepulse.service.PolicyInsightEngine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,24 @@ class PolicyInsightEngineTest {
 
         assertTrue(insight.contains("similar measured results"));
         assertTrue(insight.contains("Both recorded 4 evictions"));
+    }
+
+    @Test
+    void recommendationNamesMeasuredWinnerAndWithholdsRecommendationForSmallGap() {
+        var lru = benchmark(PolicyType.LRU, 0.50);
+        var lfu = benchmark(PolicyType.LFU, 0.65);
+        var recommendation = engine.recommend(lru, lfu);
+        assertTrue(recommendation.recommendedPolicy() == PolicyType.LFU);
+        assertTrue(recommendation.explanation().contains("LFU"));
+
+        var close = engine.recommend(benchmark(PolicyType.LRU, 0.70), benchmark(PolicyType.LFU, 0.71));
+        assertTrue(close.recommendedPolicy() == null);
+        assertTrue(close.assessment().equals("SIMILAR"));
+    }
+
+    private BenchmarkPolicyResult benchmark(PolicyType policy, double hitRate) {
+        return new BenchmarkPolicyResult(policy, 100, 80, 20, Math.round(hitRate * 80),
+                80 - Math.round(hitRate * 80), hitRate, 0, 0, 1, 100, 1, 2, 3);
     }
 
     private WorkloadCharacteristics characteristics(String frequency, String temporal) {
